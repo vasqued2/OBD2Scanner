@@ -8,17 +8,36 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
+import android.widget.Button;
+import android.widget.TextView;
+import android.view.View;
+
 public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-//        EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
-//        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
-//            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-//            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
-//            return insets;
-//        });
+
+        // Get references to UI elements
+        Button scanButton = findViewById(R.id.scanButton);
+        Button connectButton = findViewById(R.id.connectButton);
+        TextView statusText = findViewById(R.id.statusText);
+
+        // Set up click listener for Scan button
+        scanButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                statusText.setText("Scanning for Bluetooth devices...\n");
+            }
+        });
+
+        // Set up click listener for Connect button
+        connectButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                statusText.append("Connect button clicked!\n");
+            }
+        });
     }
 }
