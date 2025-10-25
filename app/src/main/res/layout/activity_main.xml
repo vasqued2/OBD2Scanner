@@ -13,6 +13,7 @@
         android:textSize="24sp"
         android:textStyle="bold"
         android:gravity="center"
+        android:textIsSelectable="true"
         android:paddingBottom="24dp"/>
 
     <Button
@@ -21,6 +22,15 @@
         android:layout_height="wrap_content"
         android:text="@string/scan_button"
         android:layout_marginBottom="16dp"/>
+
+    <EditText
+        android:id="@+id/macAddressInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Enter MAC Address (e.g., 00:11:22:33:44:55)"
+        android:inputType="text"
+        android:layout_marginBottom="16dp"
+        android:textSize="14sp"/>
 
     <ScrollView
         android:layout_width="match_parent"
@@ -44,6 +54,6 @@
         android:layout_height="wrap_content"
         android:text="@string/connect_button"
         android:layout_marginTop="16dp"
-        android:enabled="false"/>
+        android:enabled="true"/>
 
 </LinearLayout>

@@ -24,12 +24,24 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.bluetooth.BluetoothSocket;
+import android.widget.EditText;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.UUID;
+import java.util.Set;
 
 public class MainActivity extends AppCompatActivity {
     private static final int PERMISSION_REQUEST_CODE = 1;
     private BluetoothAdapter bluetoothAdapter;
     private TextView statusText;
     private boolean isScanning = false;
+    private EditText macAddressInput;
+    private BluetoothSocket bluetoothSocket;
+    private OutputStream outputStream;
+    private InputStream inputStream;
+    private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
 
     // BroadcastReceiver to handle discovered Bluetooth devices
     private final BroadcastReceiver bluetoothReceiver = new BroadcastReceiver() {
@@ -69,6 +81,7 @@ public class MainActivity extends AppCompatActivity {
         Button scanButton = findViewById(R.id.scanButton);
         Button connectButton = findViewById(R.id.connectButton);
         statusText = findViewById(R.id.statusText);
+        macAddressInput = findViewById(R.id.macAddressInput);
 
         // Initialize Bluetooth adapter
         BluetoothManager bluetoothManager = getSystemService(BluetoothManager.class);
@@ -90,15 +103,20 @@ public class MainActivity extends AppCompatActivity {
         scanButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                startBluetoothScan();
+                showPairedDevices();
             }
         });
 
-        // Set up click listener for Connect button
+// Set up click listener for Connect button
         connectButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                statusText.append("Connect button clicked!\n");
+                String macAddress = macAddressInput.getText().toString().trim();
+                if (macAddress.isEmpty()) {
+                    statusText.append("Please enter a MAC address.\n");
+                } else {
+                    connectToDevice(macAddress);
+                }
             }
         });
 
@@ -136,16 +154,119 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void showPairedDevices() {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED) {
+            statusText.append("Bluetooth permissions not granted.\n");
+            return;
+        }
+
+        statusText.setText("Paired Devices:\n\n");
+
+        Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
+
+        if (pairedDevices.size() > 0) {
+            for (BluetoothDevice device : pairedDevices) {
+                String deviceName = device.getName();
+                String deviceAddress = device.getAddress();
+                statusText.append((deviceName != null ? deviceName : "Unknown") +
+                        "\n  " + deviceAddress + "\n\n");
+            }
+        } else {
+            statusText.append("No paired devices found.\n");
+        }
+    }
+
+    private void connectToDevice(String macAddress) {
+        // Check permissions
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
+                != PackageManager.PERMISSION_GRANTED) {
+            statusText.append("Bluetooth connect permission not granted.\n");
+            return;
+        }
+
+        // Disconnect if already connected
+        if (bluetoothSocket != null && bluetoothSocket.isConnected()) {
+            try {
+                bluetoothSocket.close();
+            } catch (IOException e) {
+                // Ignore
+            }
+        }
+
+        statusText.append("Connecting to " + macAddress + "...\n");
+
+        // Run connection in background thread to avoid blocking UI
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    BluetoothDevice device = bluetoothAdapter.getRemoteDevice(macAddress);
+
+                    // Cancel discovery to improve connection reliability
+                    if (bluetoothAdapter.isDiscovering()) {
+                        bluetoothAdapter.cancelDiscovery();
+                    }
+
+                    // Create socket and connect
+                    bluetoothSocket = device.createRfcommSocketToServiceRecord(SPP_UUID);
+                    bluetoothSocket.connect();
+
+                    // Get input/output streams
+                    outputStream = bluetoothSocket.getOutputStream();
+                    inputStream = bluetoothSocket.getInputStream();
+
+                    // Update UI on main thread
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            statusText.append("Connected successfully!\n");
+                            statusText.append("Ready to send OBD2 commands.\n\n");
+                        }
+                    });
+
+                } catch (SecurityException e) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            statusText.append("Security error: " + e.getMessage() + "\n");
+                        }
+                    });
+                } catch (IOException e) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            statusText.append("Connection failed: " + e.getMessage() + "\n");
+                            statusText.append("Make sure device is paired and in range.\n");
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+
     @Override
     protected void onDestroy() {
         super.onDestroy();
+
+        // Unregister receiver
         try {
             unregisterReceiver(bluetoothReceiver);
         } catch (IllegalArgumentException e) {
             // Receiver was not registered, ignore
         }
-    }
 
+        // Close Bluetooth connection
+        if (bluetoothSocket != null) {
+            try {
+                if (inputStream != null) inputStream.close();
+                if (outputStream != null) outputStream.close();
+                bluetoothSocket.close();
+            } catch (IOException e) {
+                // Ignore
+            }
+        }
+    }
 
     private void checkBluetoothPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
