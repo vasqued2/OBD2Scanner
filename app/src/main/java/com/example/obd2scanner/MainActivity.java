@@ -17,9 +17,48 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 
 public class MainActivity extends AppCompatActivity {
     private static final int PERMISSION_REQUEST_CODE = 1;
+    private BluetoothAdapter bluetoothAdapter;
+    private TextView statusText;
+    private boolean isScanning = false;
+
+    // BroadcastReceiver to handle discovered Bluetooth devices
+    private final BroadcastReceiver bluetoothReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+
+            if (BluetoothDevice.ACTION_FOUND.equals(action)) {
+                BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                if (device != null) {
+                    try {
+                        if (ActivityCompat.checkSelfPermission(MainActivity.this,
+                                Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                            String deviceName = device.getName();
+                            String deviceAddress = device.getAddress();
+                            statusText.append("Found: " +
+                                    (deviceName != null ? deviceName : "Unknown") +
+                                    "\n  Address: " + deviceAddress + "\n\n");
+                        }
+                    } catch (SecurityException e) {
+                        statusText.append("Error accessing device: " + e.getMessage() + "\n");
+                    }
+                }
+            } else if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
+                isScanning = false;
+                statusText.append("Scan complete.\n");
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -29,13 +68,29 @@ public class MainActivity extends AppCompatActivity {
         // Get references to UI elements
         Button scanButton = findViewById(R.id.scanButton);
         Button connectButton = findViewById(R.id.connectButton);
-        TextView statusText = findViewById(R.id.statusText);
+        statusText = findViewById(R.id.statusText);
+
+        // Initialize Bluetooth adapter
+        BluetoothManager bluetoothManager = getSystemService(BluetoothManager.class);
+        bluetoothAdapter = bluetoothManager.getAdapter();
+
+        if (bluetoothAdapter == null) {
+            statusText.setText("Bluetooth is not supported on this device.\n");
+            scanButton.setEnabled(false);
+            return;
+        }
+
+        // Register broadcast receiver for Bluetooth discovery
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(BluetoothDevice.ACTION_FOUND);
+        filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
+        registerReceiver(bluetoothReceiver, filter);
 
         // Set up click listener for Scan button
         scanButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                statusText.setText("Scanning for Bluetooth devices...\n");
+                startBluetoothScan();
             }
         });
 
@@ -47,8 +102,50 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        // Check permissions
         checkBluetoothPermissions();
     }
+
+    private void startBluetoothScan() {
+        // Check if we have permission
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN)
+                != PackageManager.PERMISSION_GRANTED) {
+            statusText.setText("Bluetooth permissions not granted.\n");
+            return;
+        }
+
+        // Check if Bluetooth is enabled
+        if (!bluetoothAdapter.isEnabled()) {
+            statusText.setText("Bluetooth is disabled. Please enable Bluetooth and try again.\n");
+            return;
+        }
+
+        // Cancel any ongoing discovery
+        if (bluetoothAdapter.isDiscovering()) {
+            bluetoothAdapter.cancelDiscovery();
+        }
+
+        // Clear status and start scanning
+        statusText.setText("Scanning for Bluetooth devices...\n\n");
+        isScanning = true;
+
+        boolean started = bluetoothAdapter.startDiscovery();
+        if (!started) {
+            statusText.setText("Failed to start Bluetooth scan.\n");
+            isScanning = false;
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        try {
+            unregisterReceiver(bluetoothReceiver);
+        } catch (IllegalArgumentException e) {
+            // Receiver was not registered, ignore
+        }
+    }
+
 
     private void checkBluetoothPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
