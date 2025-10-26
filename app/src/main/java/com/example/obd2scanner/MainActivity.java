@@ -125,7 +125,65 @@ public class MainActivity extends AppCompatActivity {
         testButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                sendOBD2Command("03");
+                statusText.append("Reading fault codes...\n");
+
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            // Send command
+                            String command = "03\r";
+                            outputStream.write(command.getBytes());
+                            outputStream.flush();
+
+                            // Wait longer and read multiple times to get complete response
+                            Thread.sleep(500);
+
+                            StringBuilder response = new StringBuilder();
+                            byte[] buffer = new byte[1024];
+                            int bytes;
+                            int readAttempts = 0;
+
+                            // Keep reading until we get the '>' prompt or timeout
+                            while (readAttempts < 10) {
+                                if (inputStream.available() > 0) {
+                                    bytes = inputStream.read(buffer);
+                                    String chunk = new String(buffer, 0, bytes);
+                                    response.append(chunk);
+
+                                    // Check if we got the prompt (means response is complete)
+                                    if (chunk.contains(">")) {
+                                        break;
+                                    }
+                                }
+                                Thread.sleep(200);
+                                readAttempts++;
+                            }
+
+                            final String rawResponse = response.toString();
+                            final String parsedDTCs = parseDTCResponse(rawResponse);
+
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    statusText.append("\n=== RAW RESPONSE ===\n");
+                                    statusText.append(rawResponse);
+                                    statusText.append("\n=== PARSED CODES ===\n");
+                                    statusText.append(parsedDTCs);
+                                    statusText.append("\n==================\n\n");
+                                }
+                            });
+
+                        } catch (Exception e) {
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    statusText.append("Error: " + e.getMessage() + "\n");
+                                }
+                            });
+                        }
+                    }
+                }).start();
             }
         });
 
@@ -371,6 +429,108 @@ public class MainActivity extends AppCompatActivity {
                 statusText.append("Sent: " + cmd + " ✓\n");
             }
         });
+    }
+
+    private String parseDTCResponse(String response) {
+        StringBuilder result = new StringBuilder();
+
+        // Remove line numbers and formatting
+        String cleaned = response.replaceAll("\\d+:\\s*", "")
+                .replaceAll("\\s+", "")
+                .replaceAll(">", "")
+                .replaceAll("SEARCHING\\.\\.\\.", "");
+
+        // Find the 43 response code
+        int startIndex = cleaned.indexOf("43");
+        if (startIndex == -1) {
+            return "No DTC response found";
+        }
+
+        try {
+            // Skip past "43"
+            String data = cleaned.substring(startIndex + 2);
+
+            // Get the count byte
+            if (data.length() < 2) {
+                return "Response too short";
+            }
+
+            String countStr = data.substring(0, 2);
+            int count = Integer.parseInt(countStr, 16);
+
+            result.append("ECU reports " + count + " code(s):\n\n");
+
+            // Skip the count byte
+            data = data.substring(2);
+
+            // Only parse the number of codes specified by count
+            int codesToParse = Math.min(count, data.length() / 4);
+
+            for (int i = 0; i < codesToParse; i++) {
+                int pos = i * 4;
+                if (pos + 4 > data.length()) break;
+
+                String byte1Str = data.substring(pos, pos + 2);
+                String byte2Str = data.substring(pos + 2, pos + 4);
+
+                // Skip if we hit another "43" (new frame marker)
+                if (byte1Str.equals("43")) {
+                    result.append("\n[Skipping continuation frame]\n");
+                    break;
+                }
+
+                try {
+                    int byte1 = Integer.parseInt(byte1Str, 16);
+                    int byte2 = Integer.parseInt(byte2Str, 16);
+
+                    // Check for padding
+                    if (byte1 == 0 && byte2 == 0) continue;
+                    if (byte1 == 0x55 && byte2 == 0x55) continue;
+
+                    String dtc = decodeDTC(byte1, byte2);
+                    result.append(dtc).append("\n");
+
+                } catch (NumberFormatException e) {
+                    continue;
+                }
+            }
+
+            // Also show what came after for debugging
+            if (codesToParse * 4 < data.length()) {
+                String remaining = data.substring(codesToParse * 4);
+                result.append("\n[Remaining data: " + remaining + "]\n");
+            }
+
+            return result.toString();
+
+        } catch (Exception e) {
+            return "Error parsing: " + e.getMessage();
+        }
+    }
+
+    private String decodeDTC(int byte1, int byte2) {
+        // Top 2 bits determine the letter
+        int topBits = (byte1 >> 6) & 0x03;
+        char letter;
+        switch (topBits) {
+            case 0: letter = 'P'; break;
+            case 1: letter = 'C'; break;
+            case 2: letter = 'B'; break;
+            case 3: letter = 'U'; break;
+            default: letter = 'P';
+        }
+
+        // Next 2 bits (bits 5-4) are first digit
+        int digit1 = (byte1 >> 4) & 0x03;
+
+        // Bits 3-0 of byte1 are second digit
+        int digit2 = byte1 & 0x0F;
+
+        // byte2 splits into two digits
+        int digit3 = (byte2 >> 4) & 0x0F;
+        int digit4 = byte2 & 0x0F;
+
+        return String.format("%c%d%X%X%X", letter, digit1, digit2, digit3, digit4);
     }
 
     @Override
