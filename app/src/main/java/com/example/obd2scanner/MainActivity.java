@@ -120,6 +120,15 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        Button testButton = findViewById(R.id.testButton);
+
+        testButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                sendOBD2Command("03");
+            }
+        });
+
         // Check permissions
         checkBluetoothPermissions();
     }
@@ -216,12 +225,14 @@ public class MainActivity extends AppCompatActivity {
                     outputStream = bluetoothSocket.getOutputStream();
                     inputStream = bluetoothSocket.getInputStream();
 
-                    // Update UI on main thread
+// Update UI on main thread
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
                             statusText.append("Connected successfully!\n");
                             statusText.append("Ready to send OBD2 commands.\n\n");
+
+                            initializeOBD2();
                         }
                     });
 
@@ -243,6 +254,123 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         }).start();
+    }
+
+    private void sendOBD2Command(String command) {
+        if (bluetoothSocket == null || !bluetoothSocket.isConnected()) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    statusText.append("Not connected to device.\n");
+                }
+            });
+            return;
+        }
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    // Send command (ELM327 expects commands ending with \r)
+                    String cmdToSend = command + "\r";
+                    outputStream.write(cmdToSend.getBytes());
+                    outputStream.flush();
+
+                    // Wait a bit for response
+                    Thread.sleep(200);
+
+                    // Read response
+                    StringBuilder response = new StringBuilder();
+                    byte[] buffer = new byte[1024];
+                    int bytes;
+
+                    while (inputStream.available() > 0) {
+                        bytes = inputStream.read(buffer);
+                        response.append(new String(buffer, 0, bytes));
+                    }
+
+                    // Display on UI thread
+                    final String finalResponse = response.toString();
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            statusText.append("Sent: " + command + "\n");
+                            statusText.append("Response: " + finalResponse + "\n\n");
+                        }
+                    });
+
+                } catch (IOException e) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            statusText.append("Error sending command: " + e.getMessage() + "\n");
+                        }
+                    });
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }).start();
+    }
+
+    private void initializeOBD2() {
+        statusText.append("Initializing OBD2 adapter...\n\n");
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    // Reset
+                    sendCommandAndWait("ATZ", 2000);
+
+                    // Turn echo off
+                    sendCommandAndWait("ATE0", 500);
+
+                    // Turn linefeeds off
+                    sendCommandAndWait("ATL0", 500);
+
+                    // Set auto protocol
+                    sendCommandAndWait("ATSP0", 500);
+
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            statusText.append("Initialization complete!\n\n");
+                        }
+                    });
+
+                } catch (Exception e) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            statusText.append("Initialization error: " + e.getMessage() + "\n");
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+
+    private void sendCommandAndWait(String command, int waitMs) throws IOException, InterruptedException {
+        String cmdToSend = command + "\r";
+        outputStream.write(cmdToSend.getBytes());
+        outputStream.flush();
+
+        Thread.sleep(waitMs);
+
+        // Read and discard response (just for initialization)
+        byte[] buffer = new byte[1024];
+        while (inputStream.available() > 0) {
+            inputStream.read(buffer);
+        }
+
+        final String cmd = command;
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                statusText.append("Sent: " + cmd + " ✓\n");
+            }
+        });
     }
 
     @Override
