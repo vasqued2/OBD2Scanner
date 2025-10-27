@@ -31,6 +31,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.UUID;
 import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
     private static final int PERMISSION_REQUEST_CODE = 1;
@@ -433,6 +435,7 @@ public class MainActivity extends AppCompatActivity {
 
     private String parseDTCResponse(String response) {
         StringBuilder result = new StringBuilder();
+        List<String> allCodes = new ArrayList<>();
 
         // Remove line numbers and formatting
         String cleaned = response.replaceAll("\\d+:\\s*", "")
@@ -440,72 +443,72 @@ public class MainActivity extends AppCompatActivity {
                 .replaceAll(">", "")
                 .replaceAll("SEARCHING\\.\\.\\.", "");
 
-        // Find the 43 response code
-        int startIndex = cleaned.indexOf("43");
-        if (startIndex == -1) {
-            return "No DTC response found";
-        }
+        // Parse ALL occurrences of "43" as potential DTC response frames
+        int searchStart = 0;
 
-        try {
-            // Skip past "43"
-            String data = cleaned.substring(startIndex + 2);
+        while (true) {
+            int frameStart = cleaned.indexOf("43", searchStart);
+            if (frameStart == -1) break;
 
-            // Get the count byte
-            if (data.length() < 2) {
-                return "Response too short";
-            }
+            try {
+                // Skip past "43"
+                String data = cleaned.substring(frameStart + 2);
 
-            String countStr = data.substring(0, 2);
-            int count = Integer.parseInt(countStr, 16);
+                // Get the count/header byte (skip it)
+                if (data.length() < 2) break;
+                data = data.substring(2);
 
-            result.append("ECU reports " + count + " code(s):\n\n");
-
-            // Skip the count byte
-            data = data.substring(2);
-
-            // Only parse the number of codes specified by count
-            int codesToParse = Math.min(count, data.length() / 4);
-
-            for (int i = 0; i < codesToParse; i++) {
-                int pos = i * 4;
-                if (pos + 4 > data.length()) break;
-
-                String byte1Str = data.substring(pos, pos + 2);
-                String byte2Str = data.substring(pos + 2, pos + 4);
-
-                // Skip if we hit another "43" (new frame marker)
-                if (byte1Str.equals("43")) {
-                    result.append("\n[Skipping continuation frame]\n");
-                    break;
+                // Parse up to next "43" or end of string
+                int nextFrame = data.indexOf("43");
+                if (nextFrame > 0) {
+                    data = data.substring(0, nextFrame);
                 }
 
-                try {
-                    int byte1 = Integer.parseInt(byte1Str, 16);
-                    int byte2 = Integer.parseInt(byte2Str, 16);
+                // Parse all valid DTC pairs in this frame
+                for (int i = 0; i < data.length() - 3; i += 4) {
+                    String byte1Str = data.substring(i, i + 2);
+                    String byte2Str = data.substring(i + 2, i + 4);
 
-                    // Check for padding
-                    if (byte1 == 0 && byte2 == 0) continue;
-                    if (byte1 == 0x55 && byte2 == 0x55) continue;
+                    try {
+                        int byte1 = Integer.parseInt(byte1Str, 16);
+                        int byte2 = Integer.parseInt(byte2Str, 16);
 
-                    String dtc = decodeDTC(byte1, byte2);
-                    result.append(dtc).append("\n");
+                        // Only skip 00 00 padding (not 55 55!)
+                        if (byte1 == 0 && byte2 == 0) {
+                            continue;
+                        }
 
-                } catch (NumberFormatException e) {
-                    continue;
+                        String dtc = decodeDTC(byte1, byte2);
+
+                        // Avoid duplicates
+                        if (!allCodes.contains(dtc)) {
+                            allCodes.add(dtc);
+                        }
+
+                    } catch (NumberFormatException e) {
+                        break;
+                    }
                 }
+
+                // Move search position past this frame
+                searchStart = frameStart + 4;
+
+            } catch (Exception e) {
+                break;
             }
-
-            // Also show what came after for debugging
-            if (codesToParse * 4 < data.length()) {
-                String remaining = data.substring(codesToParse * 4);
-                result.append("\n[Remaining data: " + remaining + "]\n");
-            }
-
-            return result.toString();
-
-        } catch (Exception e) {
-            return "Error parsing: " + e.getMessage();
         }
+
+        // Build result
+        if (allCodes.isEmpty()) {
+            return "No fault codes found (vehicle is healthy!)";
+        }
+
+        result.append("Found " + allCodes.size() + " fault code(s):\n\n");
+        for (String code : allCodes) {
+            result.append(code + "\n");
+        }
+
+        return result.toString();
     }
 
     private String decodeDTC(int byte1, int byte2) {
