@@ -189,12 +189,13 @@ public class MainActivity extends AppCompatActivity {
                                     statusText.append("\n==================\n\n");
                                 }
                             });
-
                         } catch (Exception e) {
+                            final String errorMsg = e.getMessage();
                             runOnUiThread(new Runnable() {
                                 @Override
                                 public void run() {
-                                    statusText.append("Error: " + e.getMessage() + "\n");
+                                    statusText.append("Error: " + errorMsg + "\n");
+                                    showScanErrorDialog(errorMsg);
                                 }
                             });
                         }
@@ -360,7 +361,35 @@ public class MainActivity extends AppCompatActivity {
                         @Override
                         public void run() {
                             statusText.append("Connection failed: " + e.getMessage() + "\n");
-                            statusText.append("Make sure device is paired and in range.\n");
+
+                            // Show error dialog with option to forget device
+                            AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+                            builder.setTitle("Connection Failed");
+                            builder.setMessage("Could not connect to saved device.\n\n" +
+                                    "Device: " + macAddress + "\n\n" +
+                                    "Possible issues:\n" +
+                                    "• Device is out of range\n" +
+                                    "• Car is not running\n" +
+                                    "• OBD2 adapter is not powered\n\n" +
+                                    "Would you like to forget this device and select a different one?");
+
+                            builder.setPositiveButton("Forget & Reselect", new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface dialog, int which) {
+                                    forgetDevice();
+                                    macAddressInput.setText("");
+                                    statusText.append("\nReady to select a new device.\n\n");
+                                }
+                            });
+
+                            builder.setNegativeButton("Retry Later", new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface dialog, int which) {
+                                    statusText.append("Connection cancelled. You can retry when ready.\n\n");
+                                }
+                            });
+
+                            builder.show();
                         }
                     });
                 }
@@ -483,6 +512,35 @@ public class MainActivity extends AppCompatActivity {
                 statusText.append("Sent: " + cmd + " ✓\n");
             }
         });
+    }
+
+    private void showScanErrorDialog(String errorMessage) {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Scan Failed");
+        builder.setMessage("Could not read fault codes from the vehicle.\n\n" +
+                "Error: " + errorMessage + "\n\n" +
+                "Possible issues:\n" +
+                "• Vehicle communication lost\n" +
+                "• OBD2 adapter malfunction\n\n" +
+                "Would you like to forget this device and select a different one?");
+
+        builder.setPositiveButton("Forget & Reselect", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                forgetDevice();
+                macAddressInput.setText("");
+                statusText.append("\nReady to select a new device.\n\n");
+            }
+        });
+
+        builder.setNegativeButton("Keep Device", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                statusText.append("Device kept. You can try scanning again later.\n\n");
+            }
+        });
+
+        builder.show();
     }
 
     private String parseDTCResponse(String response) {
