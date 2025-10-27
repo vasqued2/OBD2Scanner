@@ -397,6 +397,67 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
+    private void autoScanForCodes() {
+        statusText.append("Auto-scanning for fault codes...\n");
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    // Wait a bit for initialization to complete
+                    Thread.sleep(500);
+
+                    // Send command
+                    String command = "03\r";
+                    outputStream.write(command.getBytes());
+                    outputStream.flush();
+
+                    // Wait for full response
+                    Thread.sleep(1500);
+
+                    // Read response
+                    StringBuilder response = new StringBuilder();
+                    byte[] buffer = new byte[1024];
+                    int bytes;
+                    int readAttempts = 0;
+
+                    while (readAttempts < 10) {
+                        if (inputStream.available() > 0) {
+                            bytes = inputStream.read(buffer);
+                            String chunk = new String(buffer, 0, bytes);
+                            response.append(chunk);
+
+                            if (chunk.contains(">")) {
+                                break;
+                            }
+                        }
+                        Thread.sleep(200);
+                        readAttempts++;
+                    }
+
+                    final String rawResponse = response.toString();
+                    final List<String> codes = parseDTCResponseToList(rawResponse);
+
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            handleCodeResults(codes);
+                        }
+                    });
+
+                } catch (Exception e) {
+                    final String errorMsg = e.getMessage();
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            statusText.append("Auto-scan error: " + errorMsg + "\n");
+                            showScanErrorDialog(errorMsg);
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
     private void sendOBD2Command(String command) {
         if (bluetoothSocket == null || !bluetoothSocket.isConnected()) {
             runOnUiThread(new Runnable() {
@@ -477,6 +538,7 @@ public class MainActivity extends AppCompatActivity {
                         @Override
                         public void run() {
                             statusText.append("Initialization complete!\n\n");
+                            autoScanForCodes();
                         }
                     });
 
@@ -543,6 +605,61 @@ public class MainActivity extends AppCompatActivity {
         builder.show();
     }
 
+    private List<String> parseDTCResponseToList(String response) {
+        List<String> allCodes = new ArrayList<>();
+
+        // Remove line numbers and formatting
+        String cleaned = response.replaceAll("\\d+:\\s*", "")
+                .replaceAll("\\s+", "")
+                .replaceAll(">", "")
+                .replaceAll("SEARCHING\\.\\.\\.", "");
+
+        // Parse ALL occurrences of "43" as potential DTC response frames
+        int searchStart = 0;
+
+        while (true) {
+            int frameStart = cleaned.indexOf("43", searchStart);
+            if (frameStart == -1) break;
+
+            try {
+                String data = cleaned.substring(frameStart + 2);
+                if (data.length() < 2) break;
+                data = data.substring(2); // Skip count byte
+
+                int nextFrame = data.indexOf("43");
+                if (nextFrame > 0) {
+                    data = data.substring(0, nextFrame);
+                }
+
+                for (int i = 0; i < data.length() - 3; i += 4) {
+                    String byte1Str = data.substring(i, i + 2);
+                    String byte2Str = data.substring(i + 2, i + 4);
+
+                    try {
+                        int byte1 = Integer.parseInt(byte1Str, 16);
+                        int byte2 = Integer.parseInt(byte2Str, 16);
+
+                        if (byte1 == 0 && byte2 == 0) continue;
+
+                        String dtc = decodeDTC(byte1, byte2);
+                        if (!allCodes.contains(dtc)) {
+                            allCodes.add(dtc);
+                        }
+
+                    } catch (NumberFormatException e) {
+                        break;
+                    }
+                }
+
+                searchStart = frameStart + 4;
+
+            } catch (Exception e) {
+                break;
+            }
+        }
+
+        return allCodes;
+    }
     private String parseDTCResponse(String response) {
         StringBuilder result = new StringBuilder();
         List<String> allCodes = new ArrayList<>();
@@ -621,6 +738,21 @@ public class MainActivity extends AppCompatActivity {
         return result.toString();
     }
 
+    private void handleCodeResults(List<String> codes) {
+        statusText.append("\n=== SCAN RESULTS ===\n");
+
+        if (codes.isEmpty()) {
+            statusText.append("No fault codes detected.\n\n");
+        } else {
+            statusText.append("Found " + codes.size() + " code(s):\n");
+            for (String code : codes) {
+                statusText.append("  " + code + "\n");
+            }
+            statusText.append("\n");
+        }
+
+        // In next phase, we'll add the filtering logic here
+    }
     private String decodeDTC(int byte1, int byte2) {
         // Top 2 bits determine the letter
         int topBits = (byte1 >> 6) & 0x03;
