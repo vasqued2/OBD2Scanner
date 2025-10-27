@@ -33,6 +33,9 @@ import java.util.UUID;
 import java.util.Set;
 import java.util.ArrayList;
 import java.util.List;
+import android.content.SharedPreferences;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 
 public class MainActivity extends AppCompatActivity {
     private static final int PERMISSION_REQUEST_CODE = 1;
@@ -122,6 +125,17 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        Button forgetButton = findViewById(R.id.forgetButton);
+
+        forgetButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                forgetDevice();
+                macAddressInput.setText(""); // Clear the input field
+                statusText.append("You can now select a new device.\n");
+            }
+        });
+
         Button testButton = findViewById(R.id.testButton);
 
         testButton.setOnClickListener(new View.OnClickListener() {
@@ -191,6 +205,18 @@ public class MainActivity extends AppCompatActivity {
 
         // Check permissions
         checkBluetoothPermissions();
+
+        // Check for saved device and auto-connect
+        String savedMac = getSavedDeviceMacAddress();
+        if (savedMac != null) {
+            statusText.append("Saved device found: " + savedMac + "\n");
+            statusText.append("Connecting automatically...\n\n");
+            macAddressInput.setText(savedMac);
+            // Auto-connect
+            connectToDevice(savedMac);
+        } else {
+            statusText.append("No saved device. Please select your OBD2 adapter.\n\n");
+        }
     }
 
     private void startBluetoothScan() {
@@ -230,20 +256,45 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        statusText.setText("Paired Devices:\n\n");
-
         Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
 
-        if (pairedDevices.size() > 0) {
-            for (BluetoothDevice device : pairedDevices) {
-                String deviceName = device.getName();
-                String deviceAddress = device.getAddress();
-                statusText.append((deviceName != null ? deviceName : "Unknown") +
-                        "\n  " + deviceAddress + "\n\n");
-            }
-        } else {
-            statusText.append("No paired devices found.\n");
+        if (pairedDevices.size() == 0) {
+            statusText.append("No paired devices found. Please pair your OBD2 adapter in Bluetooth settings first.\n");
+            return;
         }
+
+        // Create arrays for device names and addresses
+        final String[] deviceNames = new String[pairedDevices.size()];
+        final String[] deviceAddresses = new String[pairedDevices.size()];
+
+        int i = 0;
+        for (BluetoothDevice device : pairedDevices) {
+            String name = device.getName();
+            deviceNames[i] = (name != null ? name : "Unknown Device");
+            deviceAddresses[i] = device.getAddress();
+            i++;
+        }
+
+        // Show selection dialog
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Select OBD2 Device");
+        builder.setItems(deviceNames, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                String selectedMac = deviceAddresses[which];
+                String selectedName = deviceNames[which];
+
+                statusText.append("Selected: " + selectedName + "\n");
+                statusText.append("MAC: " + selectedMac + "\n\n");
+
+                macAddressInput.setText(selectedMac);
+
+                // Automatically connect to selected device
+                connectToDevice(selectedMac);
+            }
+        });
+        builder.setNegativeButton("Cancel", null);
+        builder.show();
     }
 
     private void connectToDevice(String macAddress) {
@@ -292,6 +343,7 @@ public class MainActivity extends AppCompatActivity {
                             statusText.append("Connected successfully!\n");
                             statusText.append("Ready to send OBD2 commands.\n\n");
 
+                            saveDeviceMacAddress(macAddress);
                             initializeOBD2();
                         }
                     });
@@ -604,5 +656,27 @@ public class MainActivity extends AppCompatActivity {
                 statusText.setText("Bluetooth permissions denied. Cannot scan for devices.\n");
             }
         }
+    }
+
+    // SharedPreferences methods for storing device MAC address
+    private void saveDeviceMacAddress(String macAddress) {
+        SharedPreferences prefs = getSharedPreferences("OBD2Settings", MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putString("device_mac", macAddress);
+        editor.apply();
+        statusText.append("Device saved: " + macAddress + "\n");
+    }
+
+    private String getSavedDeviceMacAddress() {
+        SharedPreferences prefs = getSharedPreferences("OBD2Settings", MODE_PRIVATE);
+        return prefs.getString("device_mac", null);
+    }
+
+    private void forgetDevice() {
+        SharedPreferences prefs = getSharedPreferences("OBD2Settings", MODE_PRIVATE);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.remove("device_mac");
+        editor.apply();
+        statusText.append("Saved device forgotten.\n");
     }
 }
