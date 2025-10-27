@@ -36,6 +36,11 @@ import java.util.List;
 import android.content.SharedPreferences;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
+import android.os.Build;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import androidx.core.app.NotificationCompat;
+import android.content.Context;
 
 public class MainActivity extends AppCompatActivity {
     private static final int PERMISSION_REQUEST_CODE = 1;
@@ -81,6 +86,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        createNotificationChannel();
 
         // Get references to UI elements
         Button scanButton = findViewById(R.id.scanButton);
@@ -742,17 +748,41 @@ public class MainActivity extends AppCompatActivity {
         statusText.append("\n=== SCAN RESULTS ===\n");
 
         if (codes.isEmpty()) {
+            // No codes detected
             statusText.append("No fault codes detected.\n\n");
+            showSilentNotification("No issues detected", "OBD2 scan complete - no fault codes found.");
+            return;
+        }
+
+        // Filter out P0420 to check for unexpected codes
+        List<String> unexpectedCodes = new ArrayList<>();
+        boolean hasP0420 = false;
+
+        for (String code : codes) {
+            if (code.equals("P0420")) {
+                hasP0420 = true;
+            } else {
+                unexpectedCodes.add(code);
+            }
+        }
+
+        if (unexpectedCodes.isEmpty()) {
+            // Only P0420 detected
+            statusText.append("Only P0420 detected (expected).\n\n");
+            showSilentNotification("Only P0420 detected (expected)",
+                    "OBD2 scan complete - catalyst efficiency code present as expected.");
         } else {
-            statusText.append("Found " + codes.size() + " code(s):\n");
+            // Unexpected codes found - show alert
+            statusText.append("UNEXPECTED CODES DETECTED!\n");
             for (String code : codes) {
                 statusText.append("  " + code + "\n");
             }
             statusText.append("\n");
-        }
 
-        // In next phase, we'll add the filtering logic here
+            showUnexpectedCodesAlert(codes, hasP0420);
+        }
     }
+
     private String decodeDTC(int byte1, int byte2) {
         // Top 2 bits determine the letter
         int topBits = (byte1 >> 6) & 0x03;
@@ -823,6 +853,73 @@ public class MainActivity extends AppCompatActivity {
                         PERMISSION_REQUEST_CODE);
             }
         }
+
+        // Check notification permission for Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                        PERMISSION_REQUEST_CODE);
+            }
+        }
+    }
+
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            CharSequence name = "OBD2 Scanner";
+            String description = "Fault code scan notifications";
+            int importance = NotificationManager.IMPORTANCE_DEFAULT;
+            NotificationChannel channel = new NotificationChannel("obd2_channel", name, importance);
+            channel.setDescription(description);
+
+            NotificationManager notificationManager = getSystemService(NotificationManager.class);
+            notificationManager.createNotificationChannel(channel);
+        }
+    }
+
+    private void showSilentNotification(String title, String message) {
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "obd2_channel")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(title)
+                .setContentText(message)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setAutoCancel(true);
+
+        NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        notificationManager.notify(1, builder.build());
+
+        statusText.append("Silent notification posted.\n\n");
+    }
+
+    private void showUnexpectedCodesAlert(List<String> allCodes, boolean hasP0420) {
+        StringBuilder message = new StringBuilder();
+        message.append("The following fault codes were detected:\n\n");
+
+        for (String code : allCodes) {
+            if (code.equals("P0420")) {
+                message.append("• ").append(code).append(" (expected)\n");
+            } else {
+                message.append("• ").append(code).append(" ⚠️\n");
+            }
+        }
+
+        message.append("\nUnexpected codes require attention!");
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("⚠️ Unexpected Fault Codes");
+        builder.setMessage(message.toString());
+        builder.setCancelable(false); // Must dismiss explicitly
+
+        builder.setPositiveButton("Dismiss", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialog, int which) {
+                statusText.append("Alert dismissed. Closing app.\n");
+                // Close app after dismissal
+                finish();
+            }
+        });
+
+        builder.show();
     }
 
     @Override
