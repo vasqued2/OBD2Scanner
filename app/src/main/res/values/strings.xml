@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">OBD2Scanner</string>
+    <string name="app_name">OBD2 Fault Scanner</string>
     <string name="hello_message">OBD2 Scanner - Ready</string>
     <string name="scan_button">Select Device</string>
     <string name="connect_button">Connect to OBD2</string>

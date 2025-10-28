@@ -41,6 +41,10 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import androidx.core.app.NotificationCompat;
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.ViewGroup;
+import android.widget.ScrollView;
 
 public class MainActivity extends AppCompatActivity {
     private static final int PERMISSION_REQUEST_CODE = 1;
@@ -219,6 +223,10 @@ public class MainActivity extends AppCompatActivity {
             statusText.append("Saved device found: " + savedMac + "\n");
             statusText.append("Connecting automatically...\n\n");
             macAddressInput.setText(savedMac);
+
+            // Hide UI during automatic operations
+            setUIVisibility(false);
+
             // Auto-connect
             connectToDevice(savedMac);
         } else {
@@ -359,6 +367,7 @@ public class MainActivity extends AppCompatActivity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
+                            setUIVisibility(true);
                             statusText.append("Security error: " + e.getMessage() + "\n");
                         }
                     });
@@ -366,6 +375,7 @@ public class MainActivity extends AppCompatActivity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
+                            setUIVisibility(true);
                             statusText.append("Connection failed: " + e.getMessage() + "\n");
 
                             // Show error dialog with option to forget device
@@ -583,6 +593,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showScanErrorDialog(String errorMessage) {
+        setUIVisibility(true);
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle("Scan Failed");
         builder.setMessage("Could not read fault codes from the vehicle.\n\n" +
@@ -808,6 +819,31 @@ public class MainActivity extends AppCompatActivity {
         return String.format("%c%d%X%X%X", letter, digit1, digit2, digit3, digit4);
     }
 
+    private void setUIVisibility(boolean visible) {
+        int visibility = visible ? View.VISIBLE : View.GONE;
+
+        findViewById(R.id.titleText).setVisibility(visibility);
+        findViewById(R.id.scanButton).setVisibility(visibility);
+        findViewById(R.id.macAddressInput).setVisibility(visibility);
+        findViewById(R.id.connectButton).setVisibility(visibility);
+        findViewById(R.id.testButton).setVisibility(visibility);
+        findViewById(R.id.forgetButton).setVisibility(visibility);
+
+        // Minimize status text area when hidden
+        View statusScrollView = findViewById(R.id.statusText).getParent() instanceof ScrollView ?
+                (View) findViewById(R.id.statusText).getParent() : null;
+
+        if (statusScrollView != null) {
+            ViewGroup.LayoutParams params = statusScrollView.getLayoutParams();
+            if (visible) {
+                params.height = ViewGroup.LayoutParams.MATCH_PARENT;
+            } else {
+                params.height = 200; // Small height
+            }
+            statusScrollView.setLayoutParams(params);
+        }
+    }
+
     @Override
     protected void onDestroy() {
         super.onDestroy();
@@ -888,9 +924,16 @@ public class MainActivity extends AppCompatActivity {
         NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         notificationManager.notify(1, builder.build());
 
-        statusText.append("Silent notification posted.\n\n");
-    }
+        statusText.append("Silent notification posted. Closing app...\n\n");
 
+        // Close app after a short delay
+        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                finish();
+            }
+        }, 1000); // 1 second delay so user can see the message
+    }
     private void showUnexpectedCodesAlert(List<String> allCodes, boolean hasP0420) {
         StringBuilder message = new StringBuilder();
         message.append("The following fault codes were detected:\n\n");
